@@ -49,8 +49,8 @@ def get_claude_response(prompt):
     try:
         with st.session_state['client'].messages.stream(
             max_tokens=1000,
+            system=f"Sei un assistente esperto in analisi di bilanci. Analizza e rispondi alle domande basandoti sul seguente bilancio XBRL:\n\n{st.session_state['pdf_text']}",
             messages=[
-                {"role": "system", "content": f"Sei un assistente esperto in analisi di bilanci. Analizza e rispondi alle domande basandoti sul seguente bilancio XBRL:\n\n{st.session_state['pdf_text']}"},
                 {"role": "user", "content": prompt}
             ],
             model="claude-3-sonnet-20240229"
@@ -93,7 +93,7 @@ if st.session_state['chat_started']:
     
     st.subheader("Chat con Claude AI")
     
-    # Display chat history (excluding the initial system message)
+    # Display chat history
     for message in st.session_state['messages']:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])

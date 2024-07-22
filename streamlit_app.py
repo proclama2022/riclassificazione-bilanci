@@ -34,7 +34,6 @@ def start_chat():
         with client.messages.stream(
             max_tokens=4096,
             system=st.session_state['system_prompt'],
-            messages=[],
             model="claude-3-sonnet-20240229"
         ) as stream:
             response = ""

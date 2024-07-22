@@ -1,82 +1,81 @@
 import streamlit as st
-import anthropic
-import pdfplumber
+from anthropic import Anthropic
+import PyPDF2
 
 def extract_text_from_pdf(pdf_file):
+    pdf_reader = PyPDF2.PdfReader(pdf_file)
     text = ""
-    try:
-        with pdfplumber.open(pdf_file) as pdf:
-            for page in pdf.pages:
-                text += page.extract_text() + "\n"
-        return text
-    except Exception as e:
-        st.error(f"Errore nell'estrazione del testo dal PDF: {str(e)}")
-        return None
+    for page in pdf_reader.pages:
+        text += page.extract_text()
+    return text
 
-def stream_chat_with_claude(api_key, dati_bilancio, messages):
-    client = anthropic.Anthropic(api_key=api_key)
+def stream_claude_response(prompt, api_key):
+    client = Anthropic(api_key=api_key)
+    system_prompt = "Sei un esperto analista finanziario. Fornisci analisi dettagliate e professionali basate sulle richieste dell'utente."
     
-    system_prompt = f"""Sei un business analyst che effettua una breve analisi riclassificazione e analisi degli indici del seguente bilancio:
-    
-    {dati_bilancio}
-    
-    Rispondi in maniera precisa e professionale, non inventare nulla che non sia presente nei dati sopra."""
-    
+    messages = [
+        {"role": "user", "content": prompt}
+    ]
+
     try:
         with client.messages.stream(
             max_tokens=4096,
             system=system_prompt,
             messages=messages,
-            model="claude-3-5-sonnet-20240620"
+            model="claude-3-sonnet-20240229"
         ) as stream:
             for text in stream.text_stream:
                 yield text
     except Exception as e:
-        yield f"Error in Claude API call: {str(e)}"
+        yield f"Errore nella chiamata all'API di Claude: {str(e)}"
 
-st.title("Chatbot con dati aziendali")
+st.set_page_config(layout="wide")
+st.title("Chatbot Analisi di Bilancio")
 
-# Sidebar for API inputs
+# Sidebar per input iniziali
 with st.sidebar:
     st.header("Configurazione")
-    bilancio_pdf = st.file_uploader("Carica il bilancio aziendale in formato PDF")
-    claude_api_key = st.text_input("Inserisci la chiave API di Claude Anthropic:", type="password")
-    
+    uploaded_file = st.file_uploader("Carica il file PDF del bilancio", type="pdf")
+    api_key = st.text_input("Inserisci la tua API key di Claude Anthropic", type="password")
+
+    if uploaded_file is not None and api_key:
+        pdf_text = extract_text_from_pdf(uploaded_file)
+        st.success("File PDF caricato con successo!")
+        st.session_state['pdf_text'] = pdf_text
+        st.session_state['api_key'] = api_key
+
+# Main area per la chat
+if 'pdf_text' in st.session_state and 'api_key' in st.session_state:
+    st.write("Seleziona un'opzione per iniziare l'analisi:")
+    options = [
+        "Riclassificazione del bilancio",
+        "Analisi dei principali indici",
+        "Analisi del cash flow",
+        "Valutazione della situazione patrimoniale"
+    ]
+
+    selected_option = st.selectbox("Scegli un'analisi", options)
+
     if st.button("Avvia analisi"):
-        if bilancio_pdf and claude_api_key:
-            with st.spinner("Effettuo analisi del bilancio..."):
-                bilancio_txt = extract_text_from_pdf(bilancio_pdf)
-                st.session_state['bilancio_txt'] = bilancio_txt
-                st.session_state['messages'] = []  # Reset chat history on new API call
-                stream_chat_with_claude(claude_api_key, bilancio_txt, [])
-        else:
-            st.error("Inserisci tutti i dati richiesti.")
+        prompt = f"""
+        Ti è stato fornito il seguente bilancio:
 
-# Main chat interface
-if 'messages' not in st.session_state:
-    st.session_state['messages'] = []
+        {st.session_state['pdf_text']}
 
-if 'bilancio_txt' in st.session_state and st.session_state['bilancio_txt']:
-    
-    for message in st.session_state['messages']:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-    
-    if prompt := st.chat_input("Cosa ti piacerebbe sapere?"):
-        st.session_state['messages'].append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        L'utente ha richiesto un'analisi su: {selected_option}
         
-        with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            full_response = ""
-            for chunk in stream_chat_with_claude(claude_api_key, st.session_state['bilancio_txt'], st.session_state['messages']):
-                full_response += chunk
-                message_placeholder.markdown(full_response + "▌")
-            message_placeholder.markdown(full_response)
-        st.session_state['messages'].append({"role": "assistant", "content": full_response})
-else:
-    st.info("Inserisci i dati richiesti nella sidebar prima di procedere con la chat.")
+        Fornisci un'analisi dettagliata e professionale basata su questa richiesta.
+        """
 
-st.sidebar.markdown("---")
-st.sidebar.write("Questa chat ti permette di chattare con un bilancio.")
+        st.write("Analisi:")
+        response_container = st.empty()
+        full_response = ""
+
+        for chunk in stream_claude_response(prompt, st.session_state['api_key']):
+            full_response += chunk
+            response_container.markdown(full_response)
+
+else:
+    st.write("Per favore, carica un file PDF e inserisci l'API key nella sidebar per iniziare.")
+
+st.write("Sviluppato con ❤️ utilizzando Streamlit e Claude AI")

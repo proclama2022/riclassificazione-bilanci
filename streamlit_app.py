@@ -27,15 +27,32 @@ def extract_text_from_pdf(pdf_file):
 
 def start_chat():
     system_prompt = f"Sei un assistente esperto in analisi di bilanci. Analizza e rispondi alle domande basandoti sul seguente bilancio XBRL:\n\n{st.session_state['pdf_text']}"
+    try:
+        with st.session_state['client'].messages.stream(
+            max_tokens=4096,
+            system=system_prompt,
+            model="claude-3-sonnet-20240229"
+        ) as stream:
+            response = ""
+            for text in stream.text_stream:
+                response += text
+                yield text
+    except Exception as e:
+        st.error(f"Errore durante l'avvio della chat: {str(e)}")
+        return None
+    
+    # Append the system prompt and the initial response to messages
     st.session_state['messages'] = [
-        {"role": "system", "content": system_prompt}
+        {"role": "assistant", "content": response}
     ]
+    st.session_state['system_prompt'] = system_prompt
 
 def get_claude_response():
     messages = st.session_state['messages']
     try:
         with st.session_state['client'].messages.stream(
             max_tokens=4096,
+            system=st.session_state('system_prompt'),
             messages=messages,
             model="claude-3-sonnet-20240229"
         ) as stream:
@@ -58,7 +75,14 @@ with st.sidebar:
             st.session_state['pdf_text'] = extract_text_from_pdf(bilancio_xbrl)
             if st.session_state['pdf_text']:
                 st.session_state['chat_started'] = True
-                start_chat()
+                with st.spinner("Inizializzazione della chat..."):
+                    with st.chat_message("assistant"):
+                        response_placeholder = st.empty()
+                        full_response = ""
+                        for response_chunk in start_chat():
+                            full_response += response_chunk
+                            response_placeholder.markdown(full_response + "▌")
+                        response_placeholder.markdown(full_response)
                 st.success("Configurazione completata. La chat è pronta!")
             else:
                 st.error("Errore nell'estrazione del testo dal PDF.")

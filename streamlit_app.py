@@ -91,18 +91,12 @@ if st.session_state['chat_started']:
                 analysis_placeholder.markdown(full_analysis + "▌")
             analysis_placeholder.markdown(full_analysis)
         
-        st.session_state['messages'].extend([
-            {"role": "user", "content": "Fornisci un'analisi iniziale del bilancio."},
+        st.session_state['messages'] = [
             {"role": "assistant", "content": full_analysis}
-        ])
+        ]
         st.session_state['initial_analysis_done'] = True
     
     st.subheader("Chat con Claude AI")
-    
-    # Display chat history
-    for message in st.session_state['messages']:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
     
     # User input
     user_input = st.chat_input("Inserisci la tua domanda sul bilancio:")
@@ -110,6 +104,8 @@ if st.session_state['chat_started']:
     if user_input:
         # Add user message to chat history
         st.session_state['messages'].append({"role": "user", "content": user_input})
+        
+        # Display user message
         with st.chat_message("user"):
             st.markdown(user_input)
         
@@ -124,6 +120,11 @@ if st.session_state['chat_started']:
         
         # Add Claude's response to chat history
         st.session_state['messages'].append({"role": "assistant", "content": full_response})
+    
+    # Display chat history (excluding the initial analysis)
+    for message in st.session_state['messages'][1:]:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
 else:
     st.info("Configura l'applicazione nella barra laterale e avvia l'analisi per iniziare.")

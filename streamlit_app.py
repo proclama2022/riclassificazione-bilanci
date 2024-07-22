@@ -5,12 +5,12 @@ import anthropic
 # Initialize session state
 if 'messages' not in st.session_state:
     st.session_state['messages'] = []
-if 'client' not in st.session_state:
-    st.session_state['client'] = None
 if 'pdf_text' not in st.session_state:
     st.session_state['pdf_text'] = None
 if 'chat_started' not in st.session_state:
     st.session_state['chat_started'] = False
+if 'client' not in st.session_state:
+    st.session_state['client'] = None
 
 st.title('Analisi Bilancio XBRL con Claude AI')
 
@@ -25,6 +25,27 @@ def extract_text_from_pdf(pdf_file):
         st.error(f"Errore nell'estrazione del testo dal PDF: {str(e)}")
         return None
 
+def start_chat():
+    system_prompt = f"Sei un assistente esperto in analisi di bilanci. Analizza e rispondi alle domande basandoti sul seguente bilancio XBRL:\n\n{st.session_state['pdf_text']}"
+    st.session_state['messages'] = [
+        {"role": "system", "content": system_prompt}
+    ]
+
+def get_claude_response():
+    messages = st.session_state['messages']
+    try:
+        with st.session_state['client'].messages.stream(
+            max_tokens=4096,
+            messages=messages,
+            model="claude-3-sonnet-20240229"
+        ) as stream:
+            response = ""
+            for text in stream.text_stream:
+                response += text
+                yield text
+    except Exception as e:
+        st.error(f"Errore durante l'elaborazione della risposta: {str(e)}")
+
 # Sidebar for configuration
 with st.sidebar:
     st.header("Configurazione")
@@ -37,38 +58,15 @@ with st.sidebar:
             st.session_state['pdf_text'] = extract_text_from_pdf(bilancio_xbrl)
             if st.session_state['pdf_text']:
                 st.session_state['chat_started'] = True
+                start_chat()
                 st.success("Configurazione completata. La chat è pronta!")
             else:
                 st.error("Errore nell'estrazione del testo dal PDF.")
         else:
             st.error("Inserisci tutti i dati richiesti.")
 
-def get_claude_response(prompt):
-    try:
-        with st.session_state['client'].messages.stream(
-            max_tokens=1000,
-            messages=[
-                {"role": "system", "content": f"Sei un assistente esperto in analisi di bilanci. Analizza e rispondi alle domande basandoti sul seguente bilancio XBRL:\n\n{st.session_state['pdf_text']}"},
-                {"role": "user", "content": prompt}
-            ],
-            model="claude-3-sonnet-20240229"
-        ) as stream:
-            response = ""
-            for text in stream.text_stream:
-                response += text
-                yield text
-    except Exception as e:
-        st.error(f"Errore durante l'elaborazione della risposta: {str(e)}")
-
 # Chat interface
 if st.session_state['chat_started']:
-    st.subheader("Chat con Claude AI")
-    
-    # Display chat history
-    for message in st.session_state['messages']:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-    
     # User input
     user_input = st.chat_input("Inserisci la tua domanda sul bilancio:")
     
@@ -82,7 +80,7 @@ if st.session_state['chat_started']:
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             full_response = ""
-            for response_chunk in get_claude_response(user_input):
+            for response_chunk in get_claude_response():
                 full_response += response_chunk
                 response_placeholder.markdown(full_response + "▌")
             response_placeholder.markdown(full_response)

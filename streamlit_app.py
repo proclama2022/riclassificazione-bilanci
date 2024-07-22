@@ -29,11 +29,12 @@ def extract_text_from_pdf(pdf_file):
 
 def start_chat():
     st.session_state['system_prompt'] = f"Sei un assistente esperto in analisi di bilanci. Analizza e rispondi alle domande basandoti sul seguente bilancio XBRL:\n\n{st.session_state['pdf_text']}"
-    
+    st.session_state['messages'].append({"role": "assistant", "content":"Effettua una breve riclassificazione e un'analisi dei principali indici di bilancio."})
     try:
         with client.messages.stream(
             max_tokens=4096,
             system=st.session_state['system_prompt'],
+            messages=st.session_state("messages"),
             model="claude-3-sonnet-20240229"
         ) as stream:
             response = ""

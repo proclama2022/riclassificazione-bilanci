@@ -27,6 +27,40 @@ def extract_text_from_pdf(pdf_file):
         st.error(f"Errore nell'estrazione del testo dal PDF: {str(e)}")
         return None
 
+def initial_analysis(pdf_text):
+    initial_prompt = """
+    Analizza il bilancio XBRL fornito e fornisci:
+    1. Una riclassificazione del bilancio
+    2. I principali indici finanziari
+    3. Un breve commento sulla situazione finanziaria dell'azienda
+
+    Rispondi fornendo una breve riclassificazione e i principali indici di bilancio.
+    """
+    try:
+        with st.session_state['client'].messages.stream(
+            max_tokens=4096,
+            system=f"Sei un assistente esperto in analisi di bilanci. Analizza il seguente bilancio XBRL:\n\n{pdf_text}",
+            messages=[{"role": "user", "content": initial_prompt}],
+            model="claude-3-sonnet-20240229"
+        ) as stream:
+            for text in stream.text_stream:
+                yield text
+    except Exception as e:
+        st.error(f"Errore durante l'analisi iniziale: {str(e)}")
+
+def handle_user_question(user_input):
+    try:
+        with st.session_state['client'].messages.stream(
+            max_tokens=4096,
+            system=f"Sei un assistente esperto in analisi di bilanci. Rispondi alle domande basandoti sul seguente bilancio XBRL:\n\n{st.session_state['pdf_text']}",
+            messages=st.session_state['messages'] + [{"role": "user", "content": user_input}],
+            model="claude-3-sonnet-20240229"
+        ) as stream:
+            for text in stream.text_stream:
+                yield text
+    except Exception as e:
+        st.error(f"Errore durante l'elaborazione della risposta: {str(e)}")
+
 # Sidebar for configuration
 with st.sidebar:
     st.header("Configurazione")
@@ -45,51 +79,23 @@ with st.sidebar:
         else:
             st.error("Inserisci tutti i dati richiesti.")
 
-def get_claude_response(prompt):
-    try:
-        with st.session_state['client'].messages.stream(
-            max_tokens=1000,
-            system=f"Sei un assistente esperto in analisi di bilanci. Analizza e rispondi alle domande basandoti sul seguente bilancio XBRL:\n\n{st.session_state['pdf_text']}",
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            model="claude-3-sonnet-20240229"
-        ) as stream:
-            for text in stream.text_stream:
-                yield text
-    except Exception as e:
-        st.error(f"Errore durante l'elaborazione della risposta: {str(e)}")
-
-# Initial analysis function
-def perform_initial_analysis():
-    initial_prompt = """
-    Analizza il bilancio XBRL fornito e fornisci:
-    1. Una riclassificazione del bilancio
-    2. I principali indici finanziari
-    3. Un breve commento sulla situazione finanziaria dell'azienda
-
-    Rispondi fornendo una breve riclassificazione e i principali indici di bilancio.
-    """
-    
-    st.subheader("Analisi Iniziale del Bilancio")
-    
-    with st.spinner("Analisi in corso..."):
-        full_analysis = ""
-        for response_chunk in get_claude_response(initial_prompt):
-            full_analysis += response_chunk
-    
-    st.markdown(full_analysis)
-    
-    st.session_state['messages'].extend([
-        {"role": "user", "content": initial_prompt},
-        {"role": "assistant", "content": full_analysis}
-    ])
-    st.session_state['initial_analysis_done'] = True
-
 # Chat interface
 if st.session_state['chat_started']:
     if not st.session_state['initial_analysis_done']:
-        perform_initial_analysis()
+        st.subheader("Analisi Iniziale del Bilancio")
+        with st.spinner("Analisi in corso..."):
+            analysis_placeholder = st.empty()
+            full_analysis = ""
+            for chunk in initial_analysis(st.session_state['pdf_text']):
+                full_analysis += chunk
+                analysis_placeholder.markdown(full_analysis + "▌")
+            analysis_placeholder.markdown(full_analysis)
+        
+        st.session_state['messages'].extend([
+            {"role": "user", "content": "Fornisci un'analisi iniziale del bilancio."},
+            {"role": "assistant", "content": full_analysis}
+        ])
+        st.session_state['initial_analysis_done'] = True
     
     st.subheader("Chat con Claude AI")
     
@@ -111,7 +117,7 @@ if st.session_state['chat_started']:
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             full_response = ""
-            for response_chunk in get_claude_response(user_input):
+            for response_chunk in handle_user_question(user_input):
                 full_response += response_chunk
                 response_placeholder.markdown(full_response + "▌")
             response_placeholder.markdown(full_response)

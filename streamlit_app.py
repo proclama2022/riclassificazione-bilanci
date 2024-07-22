@@ -43,16 +43,15 @@ def start_chat():
     
     # Append the system prompt and the initial response to messages
     st.session_state['messages'] = [
+        {"role": "system", "content": system_prompt},
         {"role": "assistant", "content": response}
     ]
-    st.session_state['system_prompt'] = system_prompt
 
 def get_claude_response():
     messages = st.session_state['messages']
     try:
         with st.session_state['client'].messages.stream(
             max_tokens=4096,
-            system=st.session_state('system_prompt'),
             messages=messages,
             model="claude-3-sonnet-20240229"
         ) as stream:

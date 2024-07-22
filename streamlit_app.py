@@ -2,21 +2,29 @@ import streamlit as st
 import pdfplumber
 import pandas as pd
 import io
-import json
 import anthropic
 import os
 
-client = None
+# Initialize session state for messages and client
+if 'messages' not in st.session_state:
+    st.session_state['messages'] = []
+if 'client' not in st.session_state:
+    st.session_state['client'] = None
 
 # Sidebar for API inputs
 with st.sidebar:
-    st.header("API Configuration")
-    bilancio_xbrl= st.file_uploader('Carica il bilancio XBRL', accept_multiple_files=False)
+    st.header("Configurazione")
+    bilancio_xbrl = st.file_uploader('Carica il bilancio XBRL in PDF', accept_multiple_files=False)
     claude_api_key = st.text_input("Inserisci la chiave API di Claude Anthropic:", type="password")
-    if claude_api_key:
-        client = anthropic.Anthropic(api_key=claude_api_key)
+    if claude_api_key and bilancio_xbrl:
+        st.session_state['client'] = anthropic.Anthropic(api_key=claude_api_key)
+        st.success("Configurazione completata")
+        st.session_state['messages'] = []
     else:
         st.error("Inserisci tutti i dati richiesti.")
+
+# Main chat interface
+st.title('Analisi Bilancio XBRL con Claude AI')
 
 def extract_text_from_pdf(pdf_file):
     text = ""
@@ -30,8 +38,8 @@ def extract_text_from_pdf(pdf_file):
     return text
 
 def analyze_with_claude(text):
-    if not client:
-        st.error("Chiave API di Anthropic non configurata. Controlla il file .env.")
+    if not st.session_state['client']:
+        st.error("Chiave API di Anthropic non configurata.")
         return None
 
     prompt = f"""
@@ -41,72 +49,77 @@ def analyze_with_claude(text):
     3. Un breve commento sulla situazione finanziaria dell'azienda
 
     Testo del bilancio:
-    {text[:10000]}
+    {text}
 
-    Rispondi in formato JSON con le seguenti chiavi:
-    "riclassificazione", "indici", "commento"
+    Rispondi fornendo una breve riclassificazione e i principali indici di bilancio.
     """
 
     try:
-        response = client.completions.create(
-            model="claude-2.1",
-            prompt=f"{anthropic.HUMAN_PROMPT} {prompt}{anthropic.AI_PROMPT}",
-            max_tokens_to_sample=1000,
-        )
-        return response.completion
+        with st.session_state['client'].messages.stream(
+            max_tokens=4096,
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            model="claude-3-sonnet-20240229"
+        ) as stream:
+            response = ""
+            for text in stream.text_stream:
+                response += text
+                yield text
+            st.session_state['messages'].append({"role": "assistant", "content": response})
     except anthropic.APIError as e:
         st.error(f"Errore API di Anthropic: {str(e)}")
-        return None
     except Exception as e:
         st.error(f"Errore inaspettato: {str(e)}")
-        return None
 
-def generate_report(analysis_result):
-    if not analysis_result:
-        return "Nessun risultato da analizzare."
-
-    try:
-        result_dict = json.loads(analysis_result)
-        report = ""
-        if "riclassificazione" in result_dict:
-            report += "## Riclassificazione del bilancio\n"
-            report += result_dict["riclassificazione"] + "\n\n"
-        if "indici" in result_dict:
-            report += "## Principali indici finanziari\n"
-            report += result_dict["indici"] + "\n\n"
-        if "commento" in result_dict:
-            report += "## Commento sulla situazione finanziaria\n"
-            report += result_dict["commento"] + "\n\n"
-        return report
-    except json.JSONDecodeError:
-        return "Errore nella decodifica del JSON. Risultato grezzo:\n\n" + analysis_result
-
-st.title('Analisi Bilancio XBRL con Claude AI')
-
-if bilancio_xbrl is not None:
-    # Estrai il testo dal PDF
+if bilancio_xbrl is not None and st.session_state['client']:
+    # Extract text from PDF
     pdf_text = extract_text_from_pdf(bilancio_xbrl)
     
     if pdf_text:
-        # Analizza il testo con Claude
-        with st.spinner('Analisi in corso con Claude AI...'):
-            analysis_result = analyze_with_claude(pdf_text)
+        # Analyze text with Claude
+        st.write("Analisi in corso con Claude AI...")
+        analysis_result = ""
+        analysis_placeholder = st.empty()
+        for chunk in analyze_with_claude(pdf_text):
+            analysis_result += chunk
+            analysis_placeholder.markdown(analysis_result)
         
-        if analysis_result:
-            # Genera il report
-            report = generate_report(analysis_result)
-            
-            # Mostra il report
-            st.markdown(report)
-            
-            # Opzione per scaricare il report
-            st.download_button(
-                label="Scarica il report",
-                data=report,
-                file_name="report_bilancio.md",
-                mime="text/markdown"
-            )
+        # Show download button for the report
+        st.download_button(
+            label="Scarica il report",
+            data=analysis_result,
+            file_name="report_bilancio.md",
+            mime="text/markdown"
+        )
 
-            # Mostra il JSON grezzo (opzionale, per debug)
-            if st.checkbox("Mostra JSON grezzo"):
-                st.json(analysis_result)
+# Chat interface for follow-up questions
+st.subheader("Domande di approfondimento")
+user_question = st.text_input("Inserisci la tua domanda sul bilancio:")
+
+if user_question:
+    st.session_state['messages'].append({"role": "user", "content": user_question})
+    
+    with st.spinner('Claude sta elaborando la risposta...'):
+        try:
+            with st.session_state['client'].messages.stream(
+                messages=st.session_state['messages'],
+                model="claude-3-sonnet-20240229",
+                max_tokens=1000
+            ) as stream:
+                response = ""
+                response_placeholder = st.empty()
+                for text in stream.text_stream:
+                    response += text
+                    response_placeholder.markdown(response)
+                st.session_state['messages'].append({"role": "assistant", "content": response})
+        except Exception as e:
+            st.error(f"Errore durante l'elaborazione della risposta: {str(e)}")
+
+# Display chat history
+st.subheader("Cronologia della chat")
+for message in st.session_state['messages']:
+    if message['role'] == 'user':
+        st.text_input("Tu:", value=message['content'], disabled=True)
+    else:
+        st.text_area("Claude:", value=message['content'], disabled=True)

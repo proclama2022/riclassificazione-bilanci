@@ -45,24 +45,17 @@ with st.sidebar:
         else:
             st.error("Inserisci tutti i dati richiesti.")
 
-def get_claude_response(prompt, is_initial_analysis=False):
+def get_claude_response(prompt):
     try:
-        messages = [
-            {"role": "system", "content": f"Sei un assistente esperto in analisi di bilanci. Analizza e rispondi alle domande basandoti sul seguente bilancio XBRL:\n\n{st.session_state['pdf_text']}"},
-            {"role": "user", "content": prompt}
-        ]
-        
-        if not is_initial_analysis:
-            messages = st.session_state['messages'] + messages
-
         with st.session_state['client'].messages.stream(
             max_tokens=1000,
-            messages=messages,
+            messages=[
+                {"role": "system", "content": f"Sei un assistente esperto in analisi di bilanci. Analizza e rispondi alle domande basandoti sul seguente bilancio XBRL:\n\n{st.session_state['pdf_text']}"},
+                {"role": "user", "content": prompt}
+            ],
             model="claude-3-sonnet-20240229"
         ) as stream:
-            response = ""
             for text in stream.text_stream:
-                response += text
                 yield text
     except Exception as e:
         st.error(f"Errore durante l'elaborazione della risposta: {str(e)}")
@@ -80,14 +73,12 @@ def perform_initial_analysis():
     
     st.subheader("Analisi Iniziale del Bilancio")
     
-    analysis_placeholder = st.empty()
-    full_analysis = ""
+    with st.spinner("Analisi in corso..."):
+        full_analysis = ""
+        for response_chunk in get_claude_response(initial_prompt):
+            full_analysis += response_chunk
     
-    for response_chunk in get_claude_response(initial_prompt, is_initial_analysis=True):
-        full_analysis += response_chunk
-        analysis_placeholder.markdown(full_analysis + "▌")
-    
-    analysis_placeholder.markdown(full_analysis)
+    st.markdown(full_analysis)
     
     st.session_state['messages'].extend([
         {"role": "user", "content": initial_prompt},
@@ -102,7 +93,7 @@ if st.session_state['chat_started']:
     
     st.subheader("Chat con Claude AI")
     
-    # Display chat history
+    # Display chat history (excluding the initial system message)
     for message in st.session_state['messages']:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
